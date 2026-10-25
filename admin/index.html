@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>훈앤팜 문의함</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #e3e5d8; --paper: #f1f2ed; --surface: #d6dac8; --ink: #15170f; --muted: #4b5042; --field: #233a2c; --accent: #b3261c; --late: #b3261c; }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Gowun Batang", serif; font-size: 17px; line-height: 1.55; word-break: keep-all; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.75rem; margin: 0 0 20px; letter-spacing: -0.02em; }
+  button, input { font: inherit; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .btn { min-height: 48px; padding: 0 18px; border: 0; background: var(--ink); color: var(--paper); font-weight: 700; cursor: pointer; }
+  .btn:active { transform: scale(.98); }
+  #login { background: var(--paper); padding: 24px; display: grid; gap: 12px; }
+  #login input { min-height: 52px; padding: 12px 14px; border: 2px solid var(--surface); background: #fff; }
+  .err { color: var(--late); font-weight: 700; min-height: 1.5em; margin: 0; }
+  .top { display: flex; justify-content: space-between; align-items: end; gap: 12px; background: var(--field); color: var(--paper); padding: 20px; margin-bottom: 8px; }
+  .top strong { display: block; font-size: 3rem; line-height: 1; }
+  .top .btn { background: var(--paper); color: var(--ink); }
+  .late { background: var(--late); color: #fff; padding: 12px 16px; font-weight: 700; margin-bottom: 8px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+  .filters button { min-height: 44px; padding: 0 14px; border: 0; background: var(--surface); cursor: pointer; }
+  .filters button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  .card { background: var(--paper); padding: 18px; margin-bottom: 8px; display: grid; gap: 8px; }
+  .card.is-late { box-shadow: inset 4px 0 0 var(--late); }
+  .meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 0.9375rem; }
+  .name { font-size: 1.25rem; font-weight: 700; }
+  .contact { justify-self: start; background: none; border: 0; padding: 0; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; cursor: pointer; min-height: 32px; }
+  .msg { white-space: pre-wrap; margin: 0; }
+  .states { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .states button { min-height: 48px; border: 0; background: var(--surface); cursor: pointer; font-weight: 700; }
+  .states button[aria-pressed="true"] { background: var(--field); color: var(--paper); }
+  .empty { background: var(--paper); padding: 24px; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>훈앤팜 문의함</h1>
+
+  <form id="login">
+    <label for="pw">관리자 비밀번호</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button class="btn" type="submit">들어가기</button>
+    <p class="err" id="login-err" role="alert"></p>
+  </form>
+
+  <section id="box" hidden>
+    <div class="top">
+      <div>새 문의<strong id="new-count">0</strong></div>
+      <button class="btn" type="button" id="reload">새로고침</button>
+    </div>
+    <p class="late" id="late" hidden></p>
+    <div class="filters" role="group" aria-label="상태별 보기">
+      <button type="button" data-f="all" aria-pressed="true">전체</button>
+      <button type="button" data-f="새 문의" aria-pressed="false">새 문의</button>
+      <button type="button" data-f="연락함" aria-pressed="false">연락함</button>
+      <button type="button" data-f="완료" aria-pressed="false">완료</button>
+    </div>
+    <p class="err" id="box-err" role="alert"></p>
+    <div id="list"></div>
+  </section>
+</main>
+<p class="toast" id="toast" hidden></p>
+
+<script>
+(() => {
+  const KEY = 'hunandfarm-admin';
+  const STATES = ['새 문의', '연락함', '완료'];
+  const $ = (id) => document.getElementById(id);
+  let rows = [];
+  let filter = 'all';
+
+  const api = (opts = {}) => fetch('/api/admin', {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', 'x-admin-password': sessionStorage.getItem(KEY) || '' },
+  });
+
+  const toast = (t) => { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 1800); };
+  const when = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const isLate = (r) => r.status === '새 문의' && Date.now() - new Date(r.created_at).getTime() > 48 * 3600 * 1000;
+
+  function render() {
+    $('new-count').textContent = rows.filter((r) => r.status === '새 문의').length;
+    const late = rows.filter(isLate).length;
+    $('late').hidden = !late;
+    $('late').textContent = `답장 늦은 문의 ${late}건 (48시간 넘음)`;
+    const list = $('list');
+    list.textContent = '';
+    const shown = rows.filter((r) => filter === 'all' || r.status === filter);
+    if (!shown.length) {
+      const p = document.createElement('p'); p.className = 'empty'; p.textContent = '아직 문의가 없어요.'; list.append(p); return;
+    }
+    for (const r of shown) {
+      const card = document.createElement('article');
+      card.className = 'card' + (isLate(r) ? ' is-late' : '');
+      const meta = document.createElement('div'); meta.className = 'meta';
+      meta.append(Object.assign(document.createElement('span'), { textContent: when(r.created_at) }), Object.assign(document.createElement('span'), { textContent: r.status }));
+      const name = Object.assign(document.createElement('div'), { className: 'name', textContent: r.name });
+      const contact = Object.assign(document.createElement('button'), { type: 'button', className: 'contact', textContent: r.contact, title: '눌러서 복사' });
+      contact.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(r.contact); toast('연락처를 복사했어요'); }
+        catch { const s = getSelection(); const rg = document.createRange(); rg.selectNodeContents(contact); s.removeAllRanges(); s.addRange(rg); }
+      });
+      const msg = Object.assign(document.createElement('p'), { className: 'msg', textContent: r.message || '(내용 없음)' });
+      const states = document.createElement('div'); states.className = 'states'; states.setAttribute('role', 'group'); states.setAttribute('aria-label', '처리 상태');
+      for (const s of STATES) {
+        const b = Object.assign(document.createElement('button'), { type: 'button', textContent: s });
+        b.setAttribute('aria-pressed', String(r.status === s));
+        b.addEventListener('click', () => setStatus(r.id, s));
+        states.append(b);
+      }
+      card.append(meta, name, contact, msg, states);
+      list.append(card);
+    }
+  }
+
+  async function load() {
+    $('box-err').textContent = '';
+    const r = await api();
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) { sessionStorage.removeItem(KEY); showLogin('비밀번호가 맞지 않아요.'); return; }
+    if (!r.ok) { $('box-err').textContent = data.error || '불러오지 못했어요.'; return; }
+    rows = data.rows || [];
+    $('login').hidden = true; $('box').hidden = false;
+    render();
+  }
+
+  async function setStatus(id, status) {
+    const r = await api({ method: 'PATCH', body: JSON.stringify({ id, status }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) { $('box-err').textContent = data.error || '바꾸지 못했어요.'; return; }
+    toast(`'${status}'(으)로 바꿨어요`);
+    load();
+  }
+
+  function showLogin(err) {
+    $('box').hidden = true; $('login').hidden = false;
+    $('login-err').textContent = err || '';
+    $('pw').value = ''; $('pw').focus();
+  }
+
+  $('login').addEventListener('submit', (e) => {
+    e.preventDefault();
+    sessionStorage.setItem(KEY, $('pw').value);
+    load();
+  });
+  $('reload').addEventListener('click', load);
+  document.querySelectorAll('.filters button').forEach((b) => b.addEventListener('click', () => {
+    filter = b.dataset.f;
+    document.querySelectorAll('.filters button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    render();
+  }));
+
+  if (sessionStorage.getItem(KEY)) load(); else showLogin();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+.env*
+.vercel
+.taste-skill/
+node_modules/
